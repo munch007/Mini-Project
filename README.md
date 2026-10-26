@@ -62,7 +62,7 @@ Travel times in the data are estimates, not official schedules.
 3. streamlit run app.py
 
 ## Project Structure
-mini-project/
+'''mini-project/
 ├── README.md              # Project overview, problem, how to run
 ├── requirements.txt       # Libraries: pandas, plotly, streamlit
 ├── app.py                 # Streamlit dashboard (Member 4)
@@ -73,7 +73,7 @@ mini-project/
     ├── routes.txt         # Route names and IDs
     ├── trips.txt          # Trips on each route
     ├── stops.txt          # Stop names and coordinates
-    └── stop_times.txt     # Order of stops on each trip
+    └── stop_times.txt     # Order of stops on each trip'''
 ## Team
 - Sanchit Rauniyar
 - Aadima Galande
