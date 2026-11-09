@@ -79,7 +79,7 @@ mini-project/
 ## Team
 - Sanchit Rauniyar
 - Aadima Galande
-- Sakshi Belbashe
+- Sakshi Sharma Belbase
 - Sarthak Chavan
 
 ## Limitations
