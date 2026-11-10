@@ -49,49 +49,17 @@ def count_trips(data):
 
 
 def overview_table(data, route_stops):
-    """One row per route: name, number of stops, length in km, trips."""
-    longest = route_stops.groupby("route_id").agg(
+    """One row per route: name, number of stops, length in km, trips.
+
+    n_stops and length_km describe ONE direction (the longer one). Counting both
+    directions together would double-count the same physical stops.
+    """
+    per_direction = route_stops.groupby(["route_id", "direction_id"]).agg(
         n_stops=("stop_sequence", "size"), length_km=("cum_km", "max")
+    ).reset_index()
+    longest = per_direction.groupby("route_id").agg(
+        n_stops=("n_stops", "max"), length_km=("length_km", "max")
     ).reset_index()
     trips = data["trips"].groupby("route_id").size().rename("trips").reset_index()
     out = data["routes"].merge(longest, on="route_id").merge(trips, on="route_id")
     return out.sort_values("n_stops", ascending=False).reset_index(drop=True)
-
-
-def routes_between(data, route_stops, area_a, area_b):
-    """Find routes that pass an area matching `area_a` and later an area matching `area_b`.
-
-    Matching is by text (case-insensitive), e.g. 'swargate' and 'katraj'.
-    Returns: route name, stops between, distance between (km), trips.
-    """
-    a, b = area_a.strip().lower(), area_b.strip().lower()
-    trip_counts = count_trips(data)
-    names = data["routes"].set_index("route_id")["route_long_name"].to_dict()
-    results = []
-
-    for (route_id, direction), g in route_stops.groupby(["route_id", "direction_id"]):
-        lower = g["stop_name"].str.lower().tolist()
-        pos_a = [i for i, n in enumerate(lower) if a in n]
-        if not pos_a:
-            continue
-        i = pos_a[0]                      # first stop matching A
-        pos_b = [j for j, n in enumerate(lower) if b in n and j > i]
-        if not pos_b:
-            continue
-        j = pos_b[0]                      # first stop matching B after A
-        km = g["cum_km"].iloc[j] - g["cum_km"].iloc[i]
-        results.append({
-            "route_id": route_id,
-            "direction_id": direction,
-            "route_name": names.get(route_id, route_id),
-            "board_at": g["stop_name"].iloc[i],
-            "get_off_at": g["stop_name"].iloc[j],
-            "stops_between": j - i,
-            "distance_km": round(km, 2),
-        })
-
-    df = pd.DataFrame(results)
-    if df.empty:
-        return df
-    df = df.merge(trip_counts, on=["route_id", "direction_id"], how="left")
-    return df.reset_index(drop=True)
