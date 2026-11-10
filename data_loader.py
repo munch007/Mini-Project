@@ -13,14 +13,14 @@ def load_gtfs(folder="data"):
         "routes": ["route_id", "route_short_name", "route_long_name"],
         "trips": ["route_id", "trip_id", "direction_id"],
         "stops": ["stop_id", "stop_name", "stop_lat", "stop_lon"],
-        "stop_times": ["trip_id", "stop_id", "stop_sequence"],
+        "stop_times": ["trip_id", "arrival_time", "stop_id", "stop_sequence"],
     }
     data = {}
     for name, columns in files.items():
         path = os.path.join(folder, name + ".txt")
         try:
             # usecols loads only the columns we need (saves memory)
-            data[name] = pd.read_csv(path, usecols=columns)
+            data[name] = pd.read_csv(path, usecols=columns, dtype={"route_id": str})
         except FileNotFoundError:
             raise FileNotFoundError(
                 f"{path} not found. Unzip pmpml_gtfs_compat.zip into the '{folder}' folder."
