@@ -32,8 +32,10 @@ def build_network(data, route_stops):
     long_ = dict(zip(data["routes"]["route_id"].astype(str), data["routes"]["route_long_name"]))
 
     # departure time of every trip from its first stop
-    st = data["stop_times"]
-    first = st.loc[st.groupby("trip_id")["stop_sequence"].idxmin(), ["trip_id", "arrival_time"]]
+    st = data["stop_times"].dropna(subset=["trip_id", "arrival_time", "stop_sequence"])
+    first = (st.sort_values(["trip_id", "stop_sequence"])
+               .groupby("trip_id", as_index=False)
+               .first()[["trip_id", "arrival_time"]])
     first = first.merge(data["trips"][["trip_id", "route_id", "direction_id"]], on="trip_id")
     first["sec"] = first["arrival_time"].map(hms_to_sec)
     starts = {
@@ -43,7 +45,9 @@ def build_network(data, route_stops):
 
     net = {}
     for (rid, d), g in route_stops.groupby(["route_id", "direction_id"]):
-        g = g.sort_values("stop_sequence")
+        g = g.dropna(subset=["arrival_time"]).sort_values("stop_sequence")
+        if len(g) < 2:
+            continue
         secs = g["arrival_time"].map(hms_to_sec).values
         net[(str(rid), d)] = {
             "short": short.get(str(rid), str(rid)),
