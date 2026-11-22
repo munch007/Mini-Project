@@ -3,6 +3,7 @@
 Run with:  streamlit run app.py
 """
 import datetime
+import pandas as pd
 import streamlit as st
 import plotly.express as px
 
@@ -12,6 +13,8 @@ from scoring import add_convenience_score, recommendation_text
 from places import build_places, resolve_place, ALIASES
 from journey import build_network, plan_journeys, describe, sec_to_hm
 from metro import load_metro, metro_options
+from live import (live_for_route, nearest_stop_name, LiveError, schedule_table,
+                  arrival_board, next_scheduled, now_seconds_ist)
 
 st.set_page_config(page_title="Pune CommuteWise", layout="wide")
 
@@ -33,7 +36,13 @@ data, route_stops, overview, network, places, metro = prepare()
 st.title("Pune CommuteWise")
 st.caption("Plan a PMPML bus journey. Data: croyla/pmpml-gtfs. Times after the first stop are estimates.")
 
-tab0, tab1, tab2, tab3 = st.tabs(["Journey planner", "Overview", "Route explorer", "Compare routes"])
+tab0, tab1, tab2, tab3, tab4 = st.tabs(["Journey planner", "Overview", "Route explorer", "Compare routes", "Live buses (experimental)"])
+
+
+@st.cache_data(ttl=15)
+def get_live(short_name):
+    """Live buses, cached for 15 s so we do not hammer the service."""
+    return live_for_route(short_name)
 
 # ---------- Screen 0: Journey planner ----------
 with tab0:
@@ -116,3 +125,71 @@ with tab3:
                 fig = px.bar(scored.head(8), x="route_name", y="convenience_score", title="Convenience score",
                              labels={"route_name": "Route", "convenience_score": "Score (0-100)"})
                 st.plotly_chart(fig)
+
+# ---------- Screen 4: Live buses (experimental) ----------
+@st.cache_data
+def get_schedule(route_id, direction_id):
+    return schedule_table(data, route_id, direction_id)
+
+
+with tab4:
+    st.caption("Experimental. Live positions come from an unofficial PMPML app service and only cover buses "
+               "that have tracking devices. Delay is approximate: it compares the bus with the closest "
+               "scheduled trip in our (estimated) timetable.")
+    live_choice = st.selectbox("Route", overview["route_long_name"], key="live_route")
+    lrow = overview[overview["route_long_name"] == live_choice].iloc[0]
+    rid = lrow["route_id"]
+    dirs = sorted(route_stops[route_stops["route_id"] == rid]["direction_id"].unique())
+    ref_by_dir = {d: route_stops[(route_stops["route_id"] == rid) & (route_stops["direction_id"] == d)]
+                  .sort_values("stop_sequence").reset_index(drop=True) for d in dirs}
+    d_choice = st.radio("Direction", dirs, horizontal=True, key="live_dir",
+                        format_func=lambda d: "Towards " + ref_by_dir[d]["stop_name"].iloc[-1])
+    ref = ref_by_dir[d_choice]
+    board_name = st.selectbox("Your boarding stop", ref["stop_name"], key="live_stop")
+    board_idx = int(ref.index[ref["stop_name"] == board_name][0])
+
+    if st.button("Check bus arrival", key="live_btn"):
+        sched = get_schedule(rid, d_choice)
+        now_s = now_seconds_ist()
+        usable = None
+        try:
+            live_all = get_live(str(rid))
+            live_dir = live_all[live_all["direction_id"] == d_choice]
+            usable = arrival_board(sched, ref, live_dir, board_idx, now_s)
+        except LiveError:
+            live_dir = None
+
+        if usable is not None and not usable.empty:
+            first = usable.iloc[0]
+            if first["delay_min"] is None or pd.isna(first["delay_min"]):
+                status = "could not be compared with our timetable"
+            elif first["delay_min"] > 1:
+                status = f"running about {int(first['delay_min'])} min late"
+            elif first["delay_min"] < -1:
+                status = f"running about {int(-first['delay_min'])} min early"
+            else:
+                status = "running on time"
+            st.success(f"Next tracked bus reaches {board_name} in about {int(first['eta_min'])} min "
+                       f"(around {first['expected']}). Scheduled: {first['scheduled']}. It is {status}.")
+            show = usable.rename(columns={"bus_id": "Bus", "stops_away": "Stops away", "near_stop": "Now near",
+                                          "eta_min": "Arrives in (min)", "expected": "Expected",
+                                          "scheduled": "Scheduled", "delay_min": "Delay (min)",
+                                          "last_seen_s": "Position age (s)"})
+            st.dataframe(show, hide_index=True)
+            pos = live_dir.copy()
+            if hasattr(px, "scatter_map"):
+                fig = px.scatter_map(pos, lat="lat", lon="lon", hover_name="bus_id", zoom=10, height=400)
+            else:
+                fig = px.scatter_mapbox(pos, lat="lat", lon="lon", hover_name="bus_id", zoom=10, height=400,
+                                        mapbox_style="open-street-map")
+            st.plotly_chart(fig)
+        else:
+            st.info("Live position is not available for this stop right now. Only some buses are tracked, "
+                    "and the live service can be down, so this does not mean that no bus is coming. "
+                    "Please use the scheduled times below.")
+            upcoming = next_scheduled(sched, ref, board_idx, now_s)
+            if upcoming:
+                st.write(f"**Next scheduled buses at {board_name}:** " + ", ".join(upcoming) +
+                         "  (estimated timetable)")
+            else:
+                st.write("No more scheduled buses today in our timetable for this stop.")
